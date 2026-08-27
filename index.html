@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Scan GRAI — HLC Tri</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #1a1a2e;
+      color: #f0f0f0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 24px 16px;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 28px;
+    }
+
+    header h1 {
+      font-size: 1.4rem;
+      font-weight: 700;
+      color: #ffffff;
+      letter-spacing: 0.02em;
+    }
+
+    header p {
+      font-size: 0.85rem;
+      color: #888;
+      margin-top: 4px;
+    }
+
+    /* --- Zone caméra --- */
+    #scanner-container {
+      position: relative;
+      width: 100%;
+      max-width: 420px;
+      border-radius: 16px;
+      overflow: hidden;
+      background: #000;
+      aspect-ratio: 4/3;
+    }
+
+    #scanner-container video,
+    #scanner-container canvas {
+      width: 100% !important;
+      height: 100% !important;
+      object-fit: cover;
+    }
+
+    /* Viseur central */
+    #viewfinder {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 80%;
+      height: 60px;
+      border: 2px solid #00d4aa;
+      border-radius: 6px;
+      pointer-events: none;
+      box-shadow: 0 0 0 9999px rgba(0,0,0,0.45);
+    }
+
+    #viewfinder::before,
+    #viewfinder::after {
+      content: '';
+      position: absolute;
+      width: 20px;
+      height: 20px;
+      border-color: #00d4aa;
+      border-style: solid;
+    }
+    #viewfinder::before {
+      top: -2px; left: -2px;
+      border-width: 3px 0 0 3px;
+      border-radius: 4px 0 0 0;
+    }
+    #viewfinder::after {
+      bottom: -2px; right: -2px;
+      border-width: 0 3px 3px 0;
+      border-radius: 0 0 4px 0;
+    }
+
+    /* Ligne de scan animée */
+    #scan-line {
+      position: absolute;
+      top: 50%;
+      left: 10%;
+      transform: translateY(-50%);
+      width: 80%;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, #00d4aa, transparent);
+      animation: scanLine 1.8s ease-in-out infinite;
+      pointer-events: none;
+    }
+
+    @keyframes scanLine {
+      0%, 100% { opacity: 0.3; transform: translateY(-30px); }
+      50% { opacity: 1; transform: translateY(30px); }
+    }
+
+    /* --- État / messages --- */
+    #status {
+      margin-top: 20px;
+      width: 100%;
+      max-width: 420px;
+      padding: 14px 16px;
+      border-radius: 12px;
+      font-size: 0.9rem;
+      text-align: center;
+      background: #2a2a3e;
+      color: #aaa;
+      min-height: 52px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+    }
+
+    #status.success {
+      background: #0d3326;
+      color: #00d4aa;
+      font-weight: 600;
+    }
+
+    #status.error {
+      background: #3a1a1a;
+      color: #ff6b6b;
+    }
+
+    /* --- GRAI affiché --- */
+    #grai-display {
+      display: none;
+      margin-top: 16px;
+      width: 100%;
+      max-width: 420px;
+      background: #2a2a3e;
+      border-radius: 12px;
+      padding: 16px;
+    }
+
+    #grai-display label {
+      font-size: 0.75rem;
+      color: #888;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    #grai-display .grai-value {
+      font-size: 1.05rem;
+      font-family: 'SF Mono', 'Courier New', monospace;
+      color: #00d4aa;
+      margin-top: 6px;
+      word-break: break-all;
+    }
+
+    /* --- Boutons --- */
+    #btn-open-form {
+      display: none;
+      margin-top: 16px;
+      width: 100%;
+      max-width: 420px;
+      padding: 16px;
+      background: #00d4aa;
+      color: #0a0a1a;
+      font-size: 1rem;
+      font-weight: 700;
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+      text-align: center;
+      text-decoration: none;
+      transition: background 0.15s;
+    }
+
+    #btn-open-form:active {
+      background: #00b890;
+    }
+
+    #btn-rescan {
+      display: none;
+      margin-top: 12px;
+      width: 100%;
+      max-width: 420px;
+      padding: 14px;
+      background: transparent;
+      color: #888;
+      font-size: 0.9rem;
+      border: 1px solid #333;
+      border-radius: 12px;
+      cursor: pointer;
+    }
+
+    #btn-rescan:active {
+      background: #2a2a3e;
+    }
+
+    /* Saisie manuelle */
+    #manual-section {
+      margin-top: 24px;
+      width: 100%;
+      max-width: 420px;
+    }
+
+    #manual-section summary {
+      font-size: 0.8rem;
+      color: #555;
+      cursor: pointer;
+      text-align: center;
+      list-style: none;
+    }
+
+    #manual-section summary::-webkit-details-marker { display: none; }
+
+    #manual-input-row {
+      display: flex;
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    #manual-grai {
+      flex: 1;
+      padding: 12px;
+      background: #2a2a3e;
+      border: 1px solid #333;
+      border-radius: 10px;
+      color: #f0f0f0;
+      font-size: 0.9rem;
+      font-family: monospace;
+    }
+
+    #btn-manual-go {
+      padding: 12px 16px;
+      background: #2a2a3e;
+      border: 1px solid #444;
+      border-radius: 10px;
+      color: #00d4aa;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1>📦 Scan GRAI</h1>
+    <p>Pointez le code-barres vers la caméra</p>
+  </header>
+
+  <div id="scanner-container">
+    <div id="viewfinder"></div>
+    <div id="scan-line"></div>
+  </div>
+
+  <div id="status">Initialisation de la caméra…</div>
+
+  <div id="grai-display">
+    <label>Code GRAI détecté</label>
+    <div class="grai-value" id="grai-value-text"></div>
+  </div>
+
+  <a id="btn-open-form" href="#" target="_blank">
+    ✅ Ouvrir le formulaire de tri
+  </a>
+
+  <button id="btn-rescan" onclick="rescan()">
+    🔄 Scanner un autre contenant
+  </button>
+
+  <details id="manual-section">
+    <summary>⌨️ Saisie manuelle du GRAI</summary>
+    <div id="manual-input-row">
+      <input id="manual-grai" type="text" inputmode="numeric" maxlength="26"
+             placeholder="26 chiffres…" />
+      <button id="btn-manual-go" onclick="handleGrai(document.getElementById('manual-grai').value.trim())">
+        OK
+      </button>
+    </div>
+  </details>
+
+  <script>
+    // URL de base du formulaire Airtable
+    const FORM_BASE_URL = "https://airtable.com/apppSluSA0HjhN1zl/paghuJLLtxxuiXMDI/form";
+    const GRAI_FIELD   = "Code Grai";  // nom exact du champ dans le formulaire
+
+    let scanning = false;
+    let lastDetected = null;
+
+    function buildFormUrl(grai) {
+      return `${FORM_BASE_URL}?prefill_${encodeURIComponent(GRAI_FIELD)}=${encodeURIComponent(grai)}`;
+    }
+
+    function cleanGrai(raw) {
+      // Supprimer le préfixe GS1-128 ']C1' si présent
+      let g = raw.trim();
+      if (g.startsWith(']C1')) g = g.slice(3);
+      // Garder uniquement les chiffres
+      g = g.replace(/\D/g, '');
+      return g;
+    }
+
+    function handleGrai(raw) {
+      const grai = cleanGrai(raw);
+
+      if (grai.length < 20) {
+        setStatus('Code trop court — réessayez', 'error');
+        return;
+      }
+
+      if (grai === lastDetected) return; // éviter les doublons
+      lastDetected = grai;
+
+      // Arrêter le scanner
+      if (scanning) {
+        Quagga.stop();
+        scanning = false;
+      }
+
+      // Afficher le GRAI
+      document.getElementById('grai-value-text').textContent = grai;
+      document.getElementById('grai-display').style.display = 'block';
+
+      // Configurer le bouton formulaire
+      const url = buildFormUrl(grai);
+      const btnForm = document.getElementById('btn-open-form');
+      btnForm.href = url;
+      btnForm.style.display = 'block';
+
+      document.getElementById('btn-rescan').style.display = 'block';
+
+      setStatus('✅ GRAI lu — ouvrez le formulaire', 'success');
+    }
+
+    function setStatus(msg, type) {
+      const el = document.getElementById('status');
+      el.textContent = msg;
+      el.className = type || '';
+    }
+
+    function startScanner() {
+      lastDetected = null;
+      document.getElementById('grai-display').style.display = 'none';
+      document.getElementById('btn-open-form').style.display = 'none';
+      document.getElementById('btn-rescan').style.display = 'none';
+      setStatus('Pointez le code-barres…');
+
+      Quagga.init({
+        inputStream: {
+          name: "Live",
+          type: "LiveStream",
+          target: document.getElementById('scanner-container'),
+          constraints: {
+            facingMode: "environment",  // caméra arrière
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          }
+        },
+        decoder: {
+          readers: ["code_128_reader"]  // Code 128 uniquement — plus rapide et moins de faux positifs
+        },
+        locate: true,
+        frequency: 10
+      }, function(err) {
+        if (err) {
+          setStatus('Caméra inaccessible — utilisez la saisie manuelle', 'error');
+          document.getElementById('manual-section').open = true;
+          return;
+        }
+        Quagga.start();
+        scanning = true;
+        setStatus('Pointez le code-barres vers la caméra…');
+      });
+
+      Quagga.onDetected(function(result) {
+        const code = result.codeResult.code;
+        if (code && result.codeResult.startInfo.error < 0.1) {
+          handleGrai(code);
+        }
+      });
+    }
+
+    function rescan() {
+      startScanner();
+    }
+
+    // Lancement au chargement
+    startScanner();
+  </script>
+
+</body>
+</html>
